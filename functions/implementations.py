@@ -4,6 +4,8 @@ from wk2_gd import gradient_descent
 from wk2_sgd import stochastic_gradient_descent
 from wk3_copy import least_squares as lsq
 from wk3_copy import ridge_regression as rr
+from wk5_logistic import logistic_regression as lr
+from wk5_logistic import penalized_logistic_regression as plr
 
 # This is the same as the function implemented during Week 2.
 def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
@@ -22,11 +24,21 @@ def least_squares(y, tx):
 def ridge_regression(y, tx, lambda_):
     return rr(y, tx, lambda_)
 
-# TODO
-def logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
-    pass
+def logistic_regression(y, tx, initial_w, max_iters, gamma):
+    # MSE based. I will return all losses, as anything else does not make sense.
+    w = initial_w
+    losses = []
+    for _ in range(max_iters):
+        grad, loss = lr(y, tx, w)
+        w -= gamma*grad
+        losses.append(loss)
+    return losses, w
 
-# TODO
 def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
-    pass
-
+    w = initial_w
+    losses = []
+    for _ in range(max_iters):
+        grad, loss = plr(y, tx, w, lambda_)
+        w -= gamma*grad
+        losses.append(loss)
+    return losses, w
