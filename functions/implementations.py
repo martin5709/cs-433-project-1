@@ -7,6 +7,7 @@ from wk3_copy import ridge_regression as rr
 from wk5_logistic import logistic_regression as lr
 from wk5_logistic import penalized_logistic_regression as plr
 from wk5_logistic import sigmoid
+from custom_functions import penalized_logistic_regression_weighted as plrw
 import numpy as np
 
 # This is the same as the function implemented during Week 2.
@@ -45,6 +46,18 @@ def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
         losses.append(loss)
     return losses, w
 
+# Personal Extras
+
 def lr_inference(tx, weights):
     """Inference for logistic regression. Returns the classification. May return list of type (N, 1)"""
     return np.round(sigmoid(tx @ weights))
+
+def reg_logistic_regression_weighted(y, tx, lambda_, initial_w, gamma, dataset_bias):
+    """Regularized Logistic Regression, but with the learning objective changed to account for dataset bias and F1 bias. dataset_bias should be the fraction of points that satisfy y == 1"""
+    bias = dataset_bias/2.0
+    w = initial_w
+    losses = []
+    grad, loss = plrw(y, tx, w, lambda_, bias)
+    w -= gamma*grad
+    losses.append(loss)
+    return losses, w
