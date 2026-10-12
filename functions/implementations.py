@@ -6,6 +6,8 @@ from wk3_copy import least_squares as lsq
 from wk3_copy import ridge_regression as rr
 from wk5_logistic import logistic_regression as lr
 from wk5_logistic import penalized_logistic_regression as plr
+from wk5_logistic import sigmoid
+import numpy as np
 
 # This is the same as the function implemented during Week 2.
 def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
@@ -42,3 +44,7 @@ def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
         w -= gamma*grad
         losses.append(loss)
     return losses, w
+
+def lr_inference(tx, weights):
+    """Inference for logistic regression. Returns the classification. May return list of type (N, 1)"""
+    return np.round(sigmoid(tx @ weights))

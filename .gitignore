@@ -5,3 +5,5 @@ COLUMN_DECISIONS.md
 basic_statistics.py
 data_processor.ipynb
 investigate_data.ipynb
+models
+simple_trainer_try1.ipynb
