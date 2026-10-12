@@ -230,3 +230,154 @@ def save_processed_data(new_x_train, features, dict_map, path: str = "./processe
 
     with open(f"{path}dict_map.json", "w", encoding="utf-8") as f:
         f.write(json.dumps(dict_map))
+
+# Test Data
+
+def map_b_test(column: np.array, mean, std) -> tuple[np.array, float, float]:
+    """Unknown, 99999, 99900 to AVG.
+    Returns: column, mean, st.d."""
+    rules = [99999, 99900]
+    for x in rules:
+        mask = (column == x)
+        column = column * ~mask + mask * mean
+    column = np.nan_to_num(column, nan=mean)
+    column = (column - mean)/std
+    return column, mean, std
+
+def map_c_test(column: np.array, mean, std) -> tuple[np.array, float, float]:
+    """900 to 0. Missing to 0.
+    Returns: column, mean, st.d."""
+    rules = [900]
+    for x in rules:
+        mask = (column == x)
+        column = column * ~mask + mask * 0
+    column = np.nan_to_num(column, nan=0)
+    column = (column - mean)/std
+    return column, mean, std
+
+def map_d_test(column: np.array, mean, std) -> tuple[np.array, float, float]:
+    """Missing to 0.
+    Returns: column, mean, st.d."""
+    column = np.nan_to_num(column, nan=0)
+    column = (column - mean)/std
+    return column, mean, std
+
+def map_e_test(column: np.array, mean, std) -> tuple[np.array, float, float]:
+    """99900 to 0. Missing to 0.
+    Returns: column, mean, st.d."""
+    rules = [99900]
+    for x in rules:
+        mask = (column == x)
+        column = column * ~mask + mask * 0
+    column = np.nan_to_num(column, nan=0)
+    column = (column - mean)/std
+    return column, mean, std
+
+def map_f_test(column: np.array, mean, std) -> tuple[np.array, float, float]:
+    """99000 to 0, missing to 0.
+    Returns: column, mean, st.d."""
+    rules = [99000]
+    for x in rules:
+        mask = (column == x)
+        column = column * ~mask + mask * 0
+    column = np.nan_to_num(column, nan=0)
+    column = (column - mean)/std
+    return column, mean, std
+
+def process_test_data(x: np.array, column_names: list[str], commands: list[str] = default_commands, dict_map: dict[any, any] = None) -> tuple[np.array, list[str], dict[str, list[float]]]:
+    """Carry out the specified modifications.
+    Assumes that no rows are dropped during transformations.
+    Returns:
+    1. The values but processed.
+    2. The names of these features.
+    3. The mappings to be used for mean and standard deviation."""
+
+    assert check_valid_columns(commands, column_names)
+
+    index = 0 # Current command
+    active = False # Whether the current command is active
+    temp_output = [] # Output to be transformed into the final numpy array
+    features = [] # The names of the columns
+
+    for i in range(x.shape[1]):
+        current_command = commands[index].split(" ")
+        # Step 1: Activate the command if possible.
+        if current_command[0] == "DROP":
+            if (not active) and (current_command[1] == column_names[i]):
+                active = True
+        elif current_command[0] == "MAP":
+            if (not active) and (current_command[2] == column_names[i]):
+                active = True
+        elif current_command[0] == "DONE":
+            pass # Do nothing.
+        else:
+            raise Exception(f"Invalid Command. Received: {current_command[0]}")
+
+        #print(f"Column: {column_names[i]}, Current Rule: {commands[index]} Active: {active}")
+
+        # Step 2: If Active, do mappings
+        if active:
+            if current_command[0] == "DROP":
+                pass # Do nothing.
+            elif current_command[0] == "MAP":
+                if current_command[1] == "A":
+                    output_list, feature_list = map_a(x[:, i], column_names[i])
+                    temp_output.extend(output_list)
+                    features.extend(feature_list)
+                elif current_command[1] == "B":
+                    output_col, mean, std = map_b_test(x[:, i], dict_map[column_names[i]][0], dict_map[column_names[i]][1])
+                    temp_output.append(output_col)
+                    features.append(column_names[i])
+                    dict_map[column_names[i]] = [float(mean), float(std)]
+                elif current_command[1] == "C":
+                    output_col, mean, std = map_c_test(x[:, i], dict_map[column_names[i]][0], dict_map[column_names[i]][1])
+                    temp_output.append(output_col)
+                    features.append(column_names[i])
+                    dict_map[column_names[i]] = [float(mean), float(std)]
+                elif current_command[1] == "D":
+                    output_col, mean, std = map_d_test(x[:, i], dict_map[column_names[i]][0], dict_map[column_names[i]][1])
+                    temp_output.append(output_col)
+                    features.append(column_names[i])
+                    dict_map[column_names[i]] = [float(mean), float(std)]
+                elif current_command[1] == "E":
+                    output_col, mean, std = map_e_test(x[:, i], dict_map[column_names[i]][0], dict_map[column_names[i]][1])
+                    temp_output.append(output_col)
+                    features.append(column_names[i])
+                    dict_map[column_names[i]] = [float(mean), float(std)]
+                elif current_command[1] == "F":
+                    output_col, mean, std = map_f_test(x[:, i], dict_map[column_names[i]][0], dict_map[column_names[i]][1])
+                    temp_output.append(output_col)
+                    features.append(column_names[i])
+                    dict_map[column_names[i]] = [float(mean), float(std)]
+                else:
+                    raise Exception("Invalid MAP command requested.")
+        else:
+            temp_output.append(map_g(x[:, i])) # Only map NANs to 0.
+            features.append(column_names[i])
+
+        # Step 3: If no longer active, advance to next command, or no check if last command.
+        if current_command[0] == "DROP":
+            if len(current_command) == 2:
+                active = False
+                index += 1
+            elif len(current_command) == 3:
+                if current_command[2] == column_names[i]:
+                    active = False
+                    index += 1
+        elif current_command[0] == "MAP":
+            if len(current_command) == 3:
+                active = False
+                index += 1
+            elif len(current_command) == 4:
+                if current_command[3] == column_names[i]:
+                    active = False
+                    index += 1
+
+    return np.column_stack(temp_output), features, dict_map
+
+def save_processed_test_data(new_x_test, features, path: str = "./processed_dataset/"):
+    """Take the output of process_data and this will save it."""
+    np.savetxt(f"{path}X_test_processed.csv", new_x_test, delimiter=",")
+
+    with open(f"{path}test_features.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(features))
