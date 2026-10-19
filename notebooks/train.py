@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from cols import DROP_COLS, NOMINAL_CATEGORICAL
+from cols import BINARY_COLS, DROP_COLS, NOMINAL_CATEGORICAL
 from tqdm import tqdm
 
 
@@ -50,16 +50,16 @@ def k_fold(X: np.ndarray, y: np.ndarray, K: int = 5):
     return fold_ids
 
 
-def acc(X: np.ndarray, y: np.ndarray, w: np.ndarray):
-    return np.mean((X @ w) * y > 0)
+def acc(X: np.ndarray, y: np.ndarray, w: np.ndarray, t: float = 0):
+    return np.mean((X @ w) * y > t)
 
 
-def f1(X: np.ndarray, y: np.ndarray, w: np.ndarray):
+def f1(X: np.ndarray, y: np.ndarray, w: np.ndarray, t: float = 0):
     pred = (X @ w).flatten()
     y = y.flatten()
-    tp = np.sum((pred >= 0) & (y > 0))
-    fp = np.sum((pred >= 0) & (y < 0))
-    fn = np.sum((pred < 0) & (y > 0))
+    tp = np.sum((pred >= t) & (y > 0))
+    fp = np.sum((pred >= t) & (y < 0))
+    fn = np.sum((pred < t) & (y > 0))
     precision = tp / (tp + fp + 1e-8)
     recall = tp / (tp + fn + 1e-8)
 
@@ -82,6 +82,8 @@ def compute_loss(
         return np.mean(np.logaddexp(0, -y * (X @ w)))
     elif loss == "hinge":
         return np.mean(np.maximum(1 - y * (X @ w), 0))
+    elif loss == "focal":
+        return np.mean(sigmoid(-y * (X @ w)) * np.logaddexp(0, -y * (X @ w)))
     else:
         raise ValueError(f"{loss} is invalid")
 
@@ -90,9 +92,19 @@ def compute_gradient(
     X: np.ndarray, y: np.ndarray, w: np.ndarray, loss: str = "logistic", lambda_: float = 0
 ):
     if loss == "logistic":
-        return -np.expand_dims(np.mean(sigmoid(-y * (X @ w)) * y * X, axis=0), -1) + lambda_ * w
+        return -np.expand_dims(np.mean(sigmoid(-y * (X @ w)) * y * X, axis=0), -1) + lambda_ * (w)
     elif loss == "hinge":
-        return np.expand_dims(np.mean((-X * y) * (1 - y * (X @ w) > 0), axis=0), -1) + lambda_ * w
+        return np.expand_dims(np.mean((-X * y) * (1 - y * (X @ w) > 0), axis=0), -1) + lambda_ * (w)
+    elif loss == "focal":
+        return -np.expand_dims(
+            np.mean(
+                sigmoid(-y * (X @ w)) * sigmoid(y * (X @ w)) * np.logaddexp(0, -y * (X @ w)) * y * X
+                + (sigmoid(-y * (X @ w)) ** 2) * y * X,
+                axis=0,
+            ),
+            -1,
+        ) + lambda_ * (w)
+
     else:
         raise ValueError(f"{loss} is invalid")
 
@@ -122,10 +134,11 @@ def gradient_descent(
     pos_ids = np.where(y_tr[:, 0] == 1)[0]
     neg_ids = np.where(y_tr[:, 0] == -1)[0]
 
-    # w = np.random.randn(D, 1) / np.sqrt(D)
-    w = least_squares(X_tr, y_tr)
+    w = np.random.randn(D, 1) / np.sqrt(D)
+    # w = least_squares(X_tr, y_tr)
 
     best_w = w.copy()
+    best_f1 = None
     best_id = None
     loss_list = []
     val_loss_list = []
@@ -166,8 +179,9 @@ def gradient_descent(
                 acc_list.append(acc(X_va, y_va, w))
                 f1_list.append(f1(X_va, y_va, w))
 
-                if best_id is None or f1_list[(best_id + 1) // valid_every] < f1_list[-1]:
+                if best_id is None or best_f1 < f1_list[-1]:
                     best_id = i
+                    best_f1 = f1_list[-1]
                     best_w = w.copy()
 
             pbar.set_postfix(
@@ -180,35 +194,96 @@ def gradient_descent(
                 }
             )
 
-    return w, best_id, best_w, loss_list, val_loss_list, acc_list, f1_list
+    return w, best_f1, best_id, best_w, loss_list, val_loss_list, acc_list, f1_list
 
 
-def one_test(x_np, y_tr_np, n_trains, loss_fn: str, lambda_: float = 0.1, gamma: float = 1e-5):
-    (X_tr, y_tr), (X_va, y_va) = split_data(x_np, y_tr_np, 0.8)
+def one_test(x_tr_np, y_tr_np, loss_fn: str, lambda_: float = 0.1, gamma: float = 1e-5):
+    # (X_tr, y_tr), (X_va, y_va) = split_data(x_np, y_tr_np, 0.8)
+    fold_ids = k_fold(x_tr_np, y_tr_np, 5)
 
-    w, best_id, best_w, loss_list, val_loss_list, acc_list, f1_list = gradient_descent(
-        X_tr,
-        y_tr,
-        X_va,
-        y_va,
-        loss_fn=loss_fn,
-        lambda_=lambda_,
-        batch_size=2**12,
-        beta=0.9,
-        gamma=gamma,
-        n_iters=2000,
-        valid_every=100,
-    )
-    fig = plt.figure()
-    ax = fig.add_subplot()
-    name = f"save_data/{x_np.shape}_{loss_fn}_{lambda_}_{gamma}"
-    _ = ax.set_title(name)
-    _ = ax.plot(np.arange(0, len(loss_list)), loss_list)
-    _ = ax.plot(np.arange(0, len(loss_list)), val_loss_list)
-    fig.savefig(f"{name}.pdf")
-    plt.close(fig)
-    np.save(f"{name}.npy", best_w)
-    return best_w, acc(X_va, y_va, best_w), f1(X_va, y_va, best_w)
+    w_list: list[np.ndarray] = []
+    best_acc_list: list[float] = []
+    best_f1_list: list[float] = []
+
+    for k, valid_ids in enumerate(fold_ids):
+        valid_mask = np.zeros(x_tr_np.shape[0], dtype=np.bool_)
+        valid_mask[valid_ids] = True
+        X_tr = x_tr_np[~valid_mask]
+        y_tr = y_tr_np[~valid_mask]
+        X_va = x_tr_np[valid_mask]
+        y_va = y_tr_np[valid_mask]
+        print(f"Fold {k}")
+        print(f"n_trains={X_tr.shape[0]}")
+        print(f"n_valids={X_va.shape[0]}")
+
+        w, best_f1, best_id, best_w, loss_list, val_loss_list, acc_list, f1_list = gradient_descent(
+            X_tr,
+            y_tr,
+            X_va,
+            y_va,
+            loss_fn=loss_fn,
+            lambda_=lambda_,
+            batch_size=2**12,
+            beta=0.9,
+            gamma=gamma,
+            n_iters=5000,
+            valid_every=100,
+        )
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        name = f"save_data/{loss_fn}_{lambda_}_{gamma}_fold{k}"
+        _ = ax.set_title(name)
+        _ = ax.plot(np.arange(0, len(loss_list)), loss_list)
+        _ = ax.plot(np.arange(0, len(loss_list)), val_loss_list)
+        fig.savefig(f"{name}.pdf")
+        plt.close(fig)
+        np.save(f"{name}.npy", best_w)
+
+        w_list.append(best_w)
+        best_acc_list.append(acc(X_va, y_va, best_w))
+        best_f1_list.append(f1(X_va, y_va, best_w))
+        print(f"Best: f1={f1_list[-1]:.4f} acc={acc_list[-1]:.4f} at iter={best_id}")
+
+    return w_list, best_acc_list, best_f1_list
+
+
+# THIS LOGIC IS GENERATED BY GEMINI (TAKE IT WITH A GRAIN OF SALT)
+def clean_brfss_column(col: np.ndarray, col_name: str) -> np.ndarray:
+    col = col.astype(np.float64)
+
+    # 1. CDC Variables with 2 Implied Decimals (divide by 100)
+    if col_name in ["_BMI5", "HTM4", "WTKG3", "_FRUTSUM", "_VEGESUM"]:
+        col[np.isin(col, [99999, 99900, 9999])] = np.nan
+        return col / 100.0
+    # 2. Days of Poor Health (88 = "None" -> 0)
+    elif col_name in ["PHYSHLTH", "MENTHLTH", "POORHLTH"]:
+        col[np.isin(col, [77, 99])] = np.nan
+        col[col == 88] = 0.0
+        return col
+    # 3. Pain Scale (0-10: 7 and 9 are real pain levels, only 77/99 are missing)
+    elif col_name == "JOINPAIN":
+        col[np.isin(col, [77, 99])] = np.nan
+        return col
+    # 4. Employment: 7=Retired (VALID!), 9=Refused
+    elif col_name == "EMPLOY1":
+        col[col == 9] = np.nan
+        return col
+    # 5. Age Groups: 1-13 are valid, 14 is Missing
+    elif col_name == "_AGEG5YR":
+        col[col == 14] = np.nan
+        return col
+    # 6. Binary Yes/No Questions (7="Don't know", 9="Refused")
+    elif col_name in BINARY_COLS:
+        col[np.isin(col, [7, 9])] = np.nan
+        return col
+    # 7. Exercise / Drinks Calculated Variables (Missing code is 99900 or 99000)
+    elif col_name in ["MAXVO2_", "FC60_", "_DRNKWEK"]:
+        col[np.isin(col, [99900, 99000])] = np.nan
+        return col
+    # 8. All other columns: only remove multi-digit refusal/don't know codes
+    else:
+        col[np.isin(col, [77, 99, 777, 999, 7777, 9999, 99900])] = np.nan
+        return col
 
 
 def main():
@@ -224,21 +299,22 @@ def main():
 
     x_tr_np = x_train_df.to_numpy()
     x_te_np = x_test_df.to_numpy()
-    # x_np = np.concat([x_tr_np, x_te_np], axis=0)
-    x_np = x_tr_np
+    x_np = np.concat([x_tr_np, x_te_np], axis=0)
     y_tr_np = y_train_df.to_numpy()
 
     n_trains = x_tr_np.shape[0]
     n_tests = x_te_np.shape[0]
 
     # Preprocessing
-    # x_df = pd.concat([x_train_df, x_test_df])
-    x_df = x_train_df
+    x_df = pd.concat([x_train_df, x_test_df])
     x_df = x_df.drop(columns=DROP_COLS, errors="ignore")
     N_DEGREES = 1
     new_cols = [np.ones(x_np.shape[0])]
+    col_names = ["const"]
     for c in tqdm(x_df.columns[1:], desc="Preprocessing"):
+        assert "#" not in c
         col = x_df[c].to_numpy().copy()
+        col = clean_brfss_column(col, c)
 
         # if pd.isnull(col).mean() > 0.75:
         #     continue
@@ -248,6 +324,7 @@ def main():
             for v in u_values:
                 if not np.isnan(v):
                     new_cols.append((col == v).astype(np.float64))
+                    col_names.append(f"{c}_C#{v}")
         else:
             mean = np.mean(col[~np.isnan(col)])
             std = np.std(col[~np.isnan(col)])
@@ -255,41 +332,100 @@ def main():
                 norm_col = np.nan_to_num((col - mean) / std, nan=0)
                 for d in range(1, N_DEGREES + 1):
                     new_cols.append(norm_col**d)
+                    col_names.append(f"{c}_N#{d}")
 
     print("Stacking...")
+    assert len(new_cols) == len(col_names)
     pp_x_np = np.stack(new_cols, axis=-1)
     pp_x_tr_np = pp_x_np[:n_trains]
     pp_x_te_np = pp_x_np[n_trains:]
 
-    print("N_TRAINs = ", pp_x_tr_np.shape[0])
-    print("N_COLS = ", pp_x_tr_np.shape[1])
+    TRAIN = False
 
-    best_w = None
-    best_f1 = None
-    for loss_fn in ["hinge", "logistic"]:
-        for lambda_ in [1e-3, 1e-6, 1e-9, 0]:
-            for gamma in [1, 1e-1, 1e-2, 1e-3]:
-                print("\n##")
-                print("\tn_degree =", N_DEGREES)
-                print("\tloss_fn =", loss_fn)
-                print("\tlambda_ =", lambda_)
-                print("\tgamma =", gamma)
-                w, va_acc, va_f1 = one_test(
-                    pp_x_tr_np,
-                    y_tr_np[:, 1:],
-                    n_trains,
-                    loss_fn=loss_fn,
-                    lambda_=lambda_,
-                    gamma=gamma,
-                )
-                print("## acc =", va_acc)
-                print("## f1 =", va_f1)
-                if best_f1 is None or best_f1 < va_f1:
-                    best_f1 = va_f1
-                    best_w = w.copy()
-                    print("## New best")
+    if TRAIN:
+        print("N_TRAINs = ", pp_x_tr_np.shape[0])
+        print("N_COLS = ", pp_x_tr_np.shape[1])
 
-    np.save(f"best_w_d{N_DEGREES}.npy", best_w)
+        for loss_fn in ["focal", "logistic"]:
+            best_w = np.zeros(0)
+            best_f1 = None
+            for lambda_ in [1e-4, 1e-5, 0]:
+                for gamma in [1, 1e-1, 1e-2, 1e-3, 1e-4]:
+                    print("\n##")
+                    print("\tn_degree =", N_DEGREES)
+                    print("\tloss_fn =", loss_fn)
+                    print("\tlambda_ =", lambda_)
+                    print("\tgamma =", gamma)
+                    w_list, acc_list, f1_list = one_test(
+                        pp_x_tr_np,
+                        y_tr_np[:, 1:],
+                        loss_fn=loss_fn,
+                        lambda_=lambda_,
+                        gamma=gamma,
+                    )
+
+                    w = np.array(w_list).mean(axis=0)
+                    k = 20
+                    sorted_ids = np.argsort(np.abs(w), axis=None, descending=True)
+                    topk_cols = set()
+                    topk_w = []
+                    for col_id in sorted_ids:
+                        name = col_names[col_id]
+                        if name not in topk_cols:
+                            topk_cols.add(name)
+                            topk_w.append(w[col_id].item())
+
+                        if len(topk_cols) == k:
+                            break
+
+                    va_acc = np.mean(np.array(acc_list))
+                    va_f1 = np.mean(np.array(f1_list))
+                    full_acc = acc(pp_x_tr_np, y_tr_np[:, 1:], w)
+                    full_f1 = f1(pp_x_tr_np, y_tr_np[:, 1:], w)
+
+                    print("## valid acc =", va_acc)
+                    print("## valid f1 =", va_f1)
+                    print("## full acc =", full_acc)
+                    print("## full f1 =", full_f1)
+                    print(f"## Top-{k} w =", list(zip(list(topk_cols), topk_w)))
+                    if best_f1 is None or best_f1 < va_f1:
+                        best_f1 = va_f1
+                        best_w = np.array(w_list)
+                        print("## New best")
+
+            np.save(f"best_w_d{N_DEGREES}_{loss_fn}.npy", best_w)
+    else:
+        w_list = []
+        for loss_fn in ["focal"]:
+            w = np.load(f"best_w_d{N_DEGREES}_{loss_fn}.npy")
+            w_list.append(w)
+
+        best_w = np.concat(w_list, axis=0)
+        best_w = best_w.mean(axis=0)
+
+        best_t = None
+        best_acc = None
+        best_f1 = None
+        for t in np.linspace(-100, 100, 201):
+            full_acc = acc(pp_x_tr_np, y_tr_np[:, 1:], best_w, t)
+            full_f1 = f1(pp_x_tr_np, y_tr_np[:, 1:], best_w, t)
+            if best_f1 is None or best_f1 < full_f1:
+                best_t = t
+                best_acc = full_acc
+                best_f1 = full_f1
+
+        print(f"t = {best_t}")
+        print(f"Acc = {best_acc}")
+        print(f"f1 = {best_f1}")
+
+        logit = (pp_x_te_np @ best_w).flatten()
+        y_pred = np.ones(pp_x_te_np.shape[0])
+        y_pred[logit < 0] = -1
+        y_pred[logit >= 0] = 1
+        submission_df = pd.DataFrame(
+            {"Id": x_test_df["Id"].astype(int), "Prediction": y_pred.astype(int)}
+        )
+        submission_df.to_csv("submission.csv", index=False)
 
 
 if __name__ == "__main__":
