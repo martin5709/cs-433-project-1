@@ -11,4 +11,4 @@ simple_trainer_try2.ipynb
 simple_trainer_try3.ipynb
 test.ipynb
 *.csv
-generate_submission.ipynb
+simple_*
