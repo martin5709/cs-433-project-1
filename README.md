@@ -2,9 +2,8 @@
 
 To setup the environment, install the packages from the `requirements.txt` file. I would recommend creating a virtual environment first.
 
-The installed libraries were as follows:
+# How to run:
 
-* NumPy (permitted external library)
-* Matplotlib (permitted for visualisations)
-* Seaborn (permitted for visualisations)
-
+* Make sure the dataset is located in ./local/dataset (relative to repo root)
+* Setup the requirements file.
+* Run python run.py
