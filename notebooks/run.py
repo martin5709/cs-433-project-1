@@ -340,12 +340,10 @@ def main():
     pp_x_tr_np = pp_x_np[:n_trains]
     pp_x_te_np = pp_x_np[n_trains:]
 
-    TRAIN = False
+    print("N_TRAINs = ", pp_x_tr_np.shape[0])
+    print("N_COLS = ", pp_x_tr_np.shape[1])
 
-    if TRAIN:
-        print("N_TRAINs = ", pp_x_tr_np.shape[0])
-        print("N_COLS = ", pp_x_tr_np.shape[1])
-
+    def train():
         for loss_fn in ["focal", "logistic"]:
             best_w = np.zeros(0)
             best_f1 = None
@@ -394,7 +392,8 @@ def main():
                         print("## New best")
 
             np.save(f"best_w_d{N_DEGREES}_{loss_fn}.npy", best_w)
-    else:
+
+    def generate_submission():
         w_list = []
         for loss_fn in ["focal"]:
             w = np.load(f"best_w_d{N_DEGREES}_{loss_fn}.npy")
@@ -426,6 +425,9 @@ def main():
             {"Id": x_test_df["Id"].astype(int), "Prediction": y_pred.astype(int)}
         )
         submission_df.to_csv("submission.csv", index=False)
+
+    train()
+    generate_submission()
 
 
 if __name__ == "__main__":
