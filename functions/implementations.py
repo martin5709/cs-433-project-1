@@ -7,6 +7,7 @@ from wk3_copy import ridge_regression as rr
 from wk5_logistic import logistic_regression as lr
 from wk5_logistic import penalized_logistic_regression as plr
 from wk5_logistic import sigmoid
+from wk5_logistic import f1_logistic
 from custom_functions import penalized_logistic_regression_weighted as plrw
 import numpy as np
 
@@ -59,5 +60,14 @@ def reg_logistic_regression_weighted(y, tx, lambda_, initial_w, gamma, dataset_b
     losses = []
     grad, loss = plrw(y, tx, w, lambda_, bias)
     w -= gamma*grad
+    losses.append(loss)
+    return losses, w
+
+def reg_f1_logistic(y, tx, lambda_, initial_w, gamma):
+    """Optimizing based on the f1 score."""
+    w = initial_w
+    losses = []
+    grad, loss = f1_logistic(y, tx, w, lambda_)
+    w += gamma*grad # Yes, the + is intentional, since this is a score metric, so it needs to be maximised, rather than minimised.
     losses.append(loss)
     return losses, w

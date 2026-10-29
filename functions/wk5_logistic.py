@@ -142,3 +142,65 @@ def penalized_logistic_regression(y, tx, w, lambda_):
     loss = calculate_loss(y, tx, w)
     return grad, loss
 
+def f1_logistic(y, tx, w, lambda_):
+    """return the gradient and the loss.
+
+    Args:
+        y:  shape=(N, 1)
+        tx: shape=(N, D)
+        w:  shape=(D, 1)
+        lambda_: scalar
+
+    Returns:
+        loss: scalar number
+        gradient: shape=(D, 1)
+
+    >>> y = np.c_[[0., 1.]]
+    >>> tx = np.arange(6).reshape(2, 3)
+    >>> w = np.array([[0.1], [0.2], [0.3]])
+    >>> lambda_ = 0.1
+    >>> loss, gradient = penalized_logistic_regression(y, tx, w, lambda_)
+    >>> round(loss, 8)
+    0.62137268
+    >>> gradient
+    array([[-0.08370763],
+           [ 0.2467104 ],
+           [ 0.57712843]])
+    """
+    # ***************************************************
+    # INSERT YOUR CODE HERE
+    # return loss, gradient, and Hessian: TODO
+    # ***************************************************
+
+    # NOTE TO SELF: I don't think they want the hessian based on the docstring.
+    # Try to create some loss function that optimizes for F1 score (negative log F1).
+    # NOTE: Not actually a part of week 5.
+    N = len(y)
+    py0 = np.sum(y == 0)/N # p(y = 0)
+    py1 = np.sum(y == 1)/N # p(y = 1)
+
+    def tsplit(arr):
+        return arr[arr[:, -1] == 0], arr[arr[:, -1] == 1]
+
+    txy0, txy1 = tsplit(np.concatenate((tx, y), axis=1))
+    txy0 = txy0[:, 0:-1]
+    txy1 = txy1[:, 0:-1]
+
+    fwy0 = (1 + np.exp(-(txy0 @ w)))**-1
+    gfwy0 = -1 * np.prod((1 + np.exp(-(txy0 @ w)))**-2) * (-txy0.T @ np.exp(-(txy0 @ w)))
+    fwy1 = (1 + np.exp(-(txy1 @ w)))**-1
+    gfwy1 = -1 * np.prod((1 + np.exp(-(txy1 @ w)))**-2) * (-txy1.T @ np.exp(-(txy1 @ w)))
+
+    grad = gfwy1/np.prod(fwy1) - (py1*gfwy1 + py0*gfwy0)/(py1*(1 + np.prod(fwy1)) + py0*np.prod(fwy0)) - 2 * lambda_ * w # The last term is just to reduce the large weights. This needs to be in the opposite direction of the desired score.
+    loss = np.log(2*np.prod(fwy1)*py1) - np.log(py1*(1+np.prod(fwy1)) + py0*np.prod(fwy0))
+
+    if np.isnan(grad[0]):
+        #print(txy0)
+        #print(txy1)
+        #print(fwy0)
+        #print(fwy1)
+        #assert False
+        print("NaN detected.")
+        return np.zeros(w.shape), 0
+
+    return grad, loss
