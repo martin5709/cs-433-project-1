@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cs433-project-1"
+authors = [{ name = "Nam-Khanh Tran", email = "nam.tran@epfl.ch" }]
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE" }
+dynamic = ["version"]
+
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "tqdm",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter",
+    "jupyterlab-code-formatter",
+    "jupyterlab_execute_time",
+    "jupyterlab-lsp",
+    "perspective-python",
+    "python-lsp-server[all]",
+    "lckr_jupyterlab_variableinspector",
+    "matplotlib",
+    "plotly",
+    "ruff",
+]
+
+[project.scripts]
+
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["functions"]
+namespaces = false
+
+[tool.ruff]
+line-length = 100
